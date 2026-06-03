@@ -530,6 +530,14 @@
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         const video = document.getElementById('video');
         video.srcObject = stream;
+        
+        // iOS対策: 明示的に再生を開始させ、ブラックアウト（静止）を防ぎます [1]
+        try {
+          await video.play();
+        } catch (playErr) {
+          console.warn("video.play failed, relying on autoplay:", playErr);
+        }
+
         document.getElementById('cam-placeholder').style.display = 'none';
         document.getElementById('start-btn').disabled = true;
         document.getElementById('stop-btn').disabled = false;
@@ -598,9 +606,14 @@
           const vWidth = video.videoWidth;
           const vHeight = video.videoHeight;
 
+          // iOSの初期化時等に、解像度が一時的に0またはNaNになる場合のエラーを防ぎます
+          if (!vWidth || !vHeight) return;
+
           const videoWrapper = document.querySelector('.video-wrapper');
           const wrapperWidth = videoWrapper.clientWidth || 400;
           const wrapperHeight = videoWrapper.clientHeight || 300;
+
+          if (!wrapperWidth || !wrapperHeight) return;
 
           const boxWidth = 280;
           const boxHeight = 100;
@@ -670,9 +683,15 @@
       const reader = new FileReader();
       reader.onload = e => {
         const img = document.getElementById('preview-img');
+        
+        // iOS/Safari対策: img.src にBase64を代入する「前に」onloadイベントを設定します [1]
+        // 先に src をセットすると、読み込み完了が早すぎてonloadが発火しないことがあります [1]
+        img.onload = () => {
+          decodeImage(img);
+        };
         img.src = e.target.result;
+        
         document.getElementById('preview-container').style.display = 'block';
-        img.onload = () => decodeImage(img);
       };
       reader.readAsDataURL(file);
     }
