@@ -126,8 +126,8 @@
     }
 
     .scan-box {
-      width: 220px;
-      height: 220px;
+      width: 280px;
+      height: 100px;
       position: relative;
     }
 
@@ -515,7 +515,7 @@
         document.getElementById('stop-btn').disabled = false;
         document.getElementById('flip-btn').disabled = false;
 
-        setStatus('スキャン中… QRコードまたはバーコードを枠内に合わせてください');
+        setStatus('スキャン中… バーコードやQRコードを枠内に合わせてください');
         startScan();
       } catch (e) {
         setStatus('カメラへのアクセスに失敗しました: ' + e.message);
@@ -570,14 +570,57 @@
       scanInterval = setInterval(() => {
         if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
 
-        canvas.width  = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
+        // ビデオの実際の解像度
+        const vWidth = video.videoWidth;
+        const vHeight = video.videoHeight;
+
+        // 表示領域（.video-wrapper）のサイズ
+        const videoWrapper = document.querySelector('.video-wrapper');
+        const wrapperWidth = videoWrapper.clientWidth || 400;
+        const wrapperHeight = videoWrapper.clientHeight || 300;
+
+        // CSS上のスキャンボックスのサイズ（280x100）
+        const boxWidth = 280;
+        const boxHeight = 100;
+
+        // object-fit: cover を考慮したビデオ上の実際の描画領域を計算
+        const displayAspect = wrapperWidth / wrapperHeight;
+        const videoAspect = vWidth / vHeight;
+
+        let activeWidth = vWidth;
+        let activeHeight = vHeight;
+        let startX = 0;
+        let startY = 0;
+
+        if (videoAspect > displayAspect) {
+          // ビデオの方が横長（表示上で左右が切り取られている）
+          activeWidth = vHeight * displayAspect;
+          startX = (vWidth - activeWidth) / 2;
+        } else {
+          // ビデオの方が縦長（表示上で上下が切り取られている）
+          activeHeight = vWidth / displayAspect;
+          startY = (vHeight - activeHeight) / 2;
+        }
+
+        // 表示サイズに対するスキャンボックスの比率
+        const rx = boxWidth / wrapperWidth;
+        const ry = boxHeight / wrapperHeight;
+
+        // スキャンボックスに対応するビデオフレーム上のクロップ領域
+        const cropWidth = activeWidth * rx;
+        const cropHeight = activeHeight * ry;
+        const cropX = startX + (activeWidth - cropWidth) / 2;
+        const cropY = startY + (activeHeight - cropHeight) / 2;
+
+        // canvasに中央のスキャンボックスに相当するエリアのみを描画して切り出し
+        canvas.width  = cropWidth;
+        canvas.height = cropHeight;
+        ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         let found = null;
 
-        /* 1) jsQR — QR-only, very fast */
+        /* 1) jsQR — QR-only */
         const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
         if (qr) found = { text: qr.data, type: 'QR Code' };
 
@@ -620,9 +663,26 @@
       setStatus('解析中...');
       const canvas = document.createElement('canvas');
       const ctx    = canvas.getContext('2d');
-      canvas.width  = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      ctx.drawImage(img, 0, 0);
+      
+      // 高解像度画像がデコーダーの処理上限を上回り、JANコードが不検出になるのを防ぐため、
+      // 適切な解像度（最大1000px）にリサイズして処理します
+      const MAX_SIZE = 1000;
+      let width = img.naturalWidth;
+      let height = img.naturalHeight;
+      
+      if (width > MAX_SIZE || height > MAX_SIZE) {
+        if (width > height) {
+          height = Math.round((height * MAX_SIZE) / width);
+          width = MAX_SIZE;
+        } else {
+          width = Math.round((width * MAX_SIZE) / height);
+          height = MAX_SIZE;
+        }
+      }
+
+      canvas.width  = width;
+      canvas.height = height;
+      ctx.drawImage(img, 0, 0, width, height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
       /* jsQR */
@@ -704,7 +764,6 @@
 
     function openRakutenSearch() {
       const text = document.getElementById('result-text').textContent;
-      // 楽天商品検索URL
       const url = `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(text)}/`;
       window.open(url, '_blank', 'noopener,noreferrer');
     }
