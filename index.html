@@ -443,62 +443,71 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           URLを開く
         </button>
+        <button class="btn-primary" id="rakuten-btn" onclick="openRakutenSearch()" style="display:none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          楽天で検索
+        </button>
       </div>
     </div>
 
     <!-- History -->
     <div class="history-section" id="history-section">
       <div class="history-header">
-        <span>スキャン履歴</span>
-        <button onclick="clearHistory()">クリア</button>
+        <span>履歴 (最大10件)</span>
+        <button onclick="clearHistory()">履歴を削除</button>
       </div>
       <div class="history-list" id="history-list"></div>
     </div>
 
-    <div id="status-bar" role="status" aria-live="polite"></div>
+    <div id="status-bar"></div>
   </div>
 
   <script>
-    /* ─── State ─── */
     let stream = null;
     let scanInterval = null;
     let facingMode = 'environment';
-    let history = [];
     let currentMode = 'camera';
+    let history = [];
 
-    /* ─── Utility ─── */
     function setStatus(msg) {
       document.getElementById('status-bar').textContent = msg;
     }
 
     function isUrl(str) {
-      return /^https?:\/\//i.test(str);
+      try {
+        const url = new URL(str);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch (_) { return false; }
     }
 
-    /* ─── Mode switching ─── */
+    function isJanCode(text, type) {
+      // JAN/EAN/UPC check
+      const t = type.toLowerCase();
+      return t.includes('ean') || t.includes('upc') || /^\d{8,13}$/.test(text);
+    }
+
     function switchMode(mode) {
       currentMode = mode;
-      const isCamera = (mode === 'camera');
-
-      document.getElementById('camera-section').style.display = isCamera ? 'block' : 'none';
-      document.getElementById('file-section').style.display  = isCamera ? 'none'  : 'block';
-
-      document.getElementById('btn-camera').classList.toggle('active', isCamera);
-      document.getElementById('btn-file').classList.toggle('active', !isCamera);
-
-      if (!isCamera) stopCamera();
+      document.getElementById('camera-section').style.display = mode === 'camera' ? 'block' : 'none';
+      document.getElementById('file-section').style.display = mode === 'file' ? 'block' : 'none';
+      document.getElementById('btn-camera').classList.toggle('active', mode === 'camera');
+      document.getElementById('btn-file').classList.toggle('active', mode === 'file');
+      
+      if (mode === 'file') stopCamera();
     }
 
     /* ─── Camera ─── */
     async function startCamera() {
+      if (stream) stopCamera();
       try {
-        setStatus('カメラへのアクセスを要求中...');
-        if (stream) stream.getTracks().forEach(t => t.stop());
-
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1280 }, height: { ideal: 960 } }
-        });
-
+        const constraints = {
+          video: {
+            facingMode: facingMode,
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
         const video = document.getElementById('video');
         video.srcObject = stream;
         document.getElementById('cam-placeholder').style.display = 'none';
@@ -652,7 +661,12 @@
       document.getElementById('result-type').textContent = type;
       document.getElementById('result-text').textContent = text;
       document.getElementById('result-section').style.display = 'block';
-      document.getElementById('open-btn').style.display = isUrl(text) ? 'inline-flex' : 'none';
+      
+      const is_url = isUrl(text);
+      const is_jan = isJanCode(text, type);
+      
+      document.getElementById('open-btn').style.display = is_url ? 'inline-flex' : 'none';
+      document.getElementById('rakuten-btn').style.display = is_jan ? 'inline-flex' : 'none';
 
       addHistory(text, type);
       setStatus('✓ スキャン成功');
@@ -686,6 +700,13 @@
     function openResultUrl() {
       const text = document.getElementById('result-text').textContent;
       if (isUrl(text)) window.open(text, '_blank', 'noopener,noreferrer');
+    }
+
+    function openRakutenSearch() {
+      const text = document.getElementById('result-text').textContent;
+      // 楽天商品検索URL
+      const url = `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(text)}/`;
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
 
     /* ─── History ─── */
