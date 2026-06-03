@@ -469,6 +469,27 @@
     let currentMode = 'camera';
     let history = [];
 
+    // ZXing コアデコーダーの初期化設定
+    const zxingFormats = [
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.DATA_MATRIX,
+      ZXing.BarcodeFormat.PDF_417,
+      ZXing.BarcodeFormat.AZTEC,
+      ZXing.BarcodeFormat.QR_CODE,
+    ];
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, zxingFormats);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+    const zxReader = new ZXing.MultiFormatReader();
+    zxReader.setHints(hints);
+
     function setStatus(msg) {
       document.getElementById('status-bar').textContent = msg;
     }
@@ -481,7 +502,6 @@
     }
 
     function isJanCode(text, type) {
-      // JAN/EAN/UPC check
       const t = type.toLowerCase();
       return t.includes('ean') || t.includes('upc') || /^\d{8,13}$/.test(text);
     }
@@ -541,6 +561,28 @@
       startCamera();
     }
 
+    // RGBAのピクセルデータをZXingコアが認識可能な「1ピクセル1バイトのグレースケール輝度配列」に正しく変換してデコードする関数
+    function decodeWithZXing(imageData) {
+      const width = imageData.width;
+      const height = imageData.height;
+      const data = imageData.data;
+      const len = width * height;
+      
+      // RGBAデータを公式の加重平均式に基づき、白黒輝度に変換します
+      const luminances = new Uint8ClampedArray(len);
+      for (let i = 0; i < len; i++) {
+        const r = data[i * 4];
+        const g = data[i * 4 + 1];
+        const b = data[i * 4 + 2];
+        luminances[i] = (0.299 * r + 0.587 * g + 0.114 * b) & 0xff;
+      }
+      
+      const luminanceSource = new ZXing.RGBLuminanceSource(luminances, width, height);
+      const binaryBitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+      
+      return zxReader.decode(binaryBitmap);
+    }
+
     /* ─── Real-time scan loop ─── */
     function startScan() {
       const video  = document.getElementById('video');
@@ -549,98 +591,74 @@
       let lastCode = '';
       let lastTime = 0;
 
-      const zxingFormats = [
-        ZXing.BarcodeFormat.EAN_13,
-        ZXing.BarcodeFormat.EAN_8,
-        ZXing.BarcodeFormat.CODE_128,
-        ZXing.BarcodeFormat.CODE_39,
-        ZXing.BarcodeFormat.UPC_A,
-        ZXing.BarcodeFormat.UPC_E,
-        ZXing.BarcodeFormat.ITF,
-        ZXing.BarcodeFormat.DATA_MATRIX,
-        ZXing.BarcodeFormat.PDF_417,
-        ZXing.BarcodeFormat.AZTEC,
-        ZXing.BarcodeFormat.QR_CODE,
-      ];
-      const hints = new Map();
-      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, zxingFormats);
-      const zxReader = new ZXing.MultiFormatReader();
-      zxReader.setHints(hints);
-
       scanInterval = setInterval(() => {
         if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
 
-        // ビデオの実際の解像度
-        const vWidth = video.videoWidth;
-        const vHeight = video.videoHeight;
+        try {
+          const vWidth = video.videoWidth;
+          const vHeight = video.videoHeight;
 
-        // 表示領域（.video-wrapper）のサイズ
-        const videoWrapper = document.querySelector('.video-wrapper');
-        const wrapperWidth = videoWrapper.clientWidth || 400;
-        const wrapperHeight = videoWrapper.clientHeight || 300;
+          const videoWrapper = document.querySelector('.video-wrapper');
+          const wrapperWidth = videoWrapper.clientWidth || 400;
+          const wrapperHeight = videoWrapper.clientHeight || 300;
 
-        // CSS上のスキャンボックスのサイズ（280x100）
-        const boxWidth = 280;
-        const boxHeight = 100;
+          const boxWidth = 280;
+          const boxHeight = 100;
 
-        // object-fit: cover を考慮したビデオ上の実際の描画領域を計算
-        const displayAspect = wrapperWidth / wrapperHeight;
-        const videoAspect = vWidth / vHeight;
+          const displayAspect = wrapperWidth / wrapperHeight;
+          const videoAspect = vWidth / vHeight;
 
-        let activeWidth = vWidth;
-        let activeHeight = vHeight;
-        let startX = 0;
-        let startY = 0;
+          let activeWidth = vWidth;
+          let activeHeight = vHeight;
+          let startX = 0;
+          let startY = 0;
 
-        if (videoAspect > displayAspect) {
-          // ビデオの方が横長（表示上で左右が切り取られている）
-          activeWidth = vHeight * displayAspect;
-          startX = (vWidth - activeWidth) / 2;
-        } else {
-          // ビデオの方が縦長（表示上で上下が切り取られている）
-          activeHeight = vWidth / displayAspect;
-          startY = (vHeight - activeHeight) / 2;
-        }
+          if (videoAspect > displayAspect) {
+            activeWidth = vHeight * displayAspect;
+            startX = (vWidth - activeWidth) / 2;
+          } else {
+            activeHeight = vWidth / displayAspect;
+            startY = (vHeight - activeHeight) / 2;
+          }
 
-        // 表示サイズに対するスキャンボックスの比率
-        const rx = boxWidth / wrapperWidth;
-        const ry = boxHeight / wrapperHeight;
+          const rx = boxWidth / wrapperWidth;
+          const ry = boxHeight / wrapperHeight;
 
-        // スキャンボックスに対応するビデオフレーム上のクロップ領域
-        const cropWidth = activeWidth * rx;
-        const cropHeight = activeHeight * ry;
-        const cropX = startX + (activeWidth - cropWidth) / 2;
-        const cropY = startY + (activeHeight - cropHeight) / 2;
+          const cropWidth = activeWidth * rx;
+          const cropHeight = activeHeight * ry;
+          const cropX = startX + (activeWidth - cropWidth) / 2;
+          const cropY = startY + (activeHeight - cropHeight) / 2;
 
-        // canvasに中央のスキャンボックスに相当するエリアのみを描画して切り出し
-        canvas.width  = cropWidth;
-        canvas.height = cropHeight;
-        ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+          canvas.width  = cropWidth;
+          canvas.height = cropHeight;
+          
+          ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
 
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let found = null;
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          let found = null;
 
-        /* 1) jsQR — QR-only */
-        const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
-        if (qr) found = { text: qr.data, type: 'QR Code' };
-
-        /* 2) ZXing — all 1D/2D barcode formats */
-        if (!found) {
-          try {
-            const lum = new ZXing.RGBLuminanceSource(imageData.data, imageData.width, imageData.height);
-            const bin = new ZXing.HybridBinarizer(lum);
-            const bmp = new ZXing.BinaryBitmap(bin);
-            const res = zxReader.decode(bmp);
+          /* 1) jsQR — QR-only */
+          const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+          if (qr) {
+            found = { text: qr.data, type: 'QR Code' };
+          } else {
+            /* 2) ZXing — 自前高精度デコード */
+            const res = decodeWithZXing(imageData);
             found = { text: res.getText(), type: res.getBarcodeFormat().toString().replace(/_/g, ' ') };
-          } catch (_) {}
-        }
+          }
 
-        if (found) {
-          const now = Date.now();
-          if (found.text === lastCode && now - lastTime < 3000) return; /* debounce */
-          lastCode = found.text;
-          lastTime = now;
-          showResult(found.text, found.type);
+          if (found) {
+            const now = Date.now();
+            if (found.text === lastCode && now - lastTime < 3000) {
+              // debounce
+            } else {
+              lastCode = found.text;
+              lastTime = now;
+              showResult(found.text, found.type);
+            }
+          }
+        } catch (_) {
+          // 不検出時はスルー
         }
       }, 200);
     }
@@ -661,57 +679,45 @@
 
     function decodeImage(img) {
       setStatus('解析中...');
-      const canvas = document.createElement('canvas');
-      const ctx    = canvas.getContext('2d');
       
-      // 高解像度画像がデコーダーの処理上限を上回り、JANコードが不検出になるのを防ぐため、
-      // 適切な解像度（最大1000px）にリサイズして処理します
-      const MAX_SIZE = 1000;
-      let width = img.naturalWidth;
-      let height = img.naturalHeight;
-      
-      if (width > MAX_SIZE || height > MAX_SIZE) {
-        if (width > height) {
-          height = Math.round((height * MAX_SIZE) / width);
-          width = MAX_SIZE;
-        } else {
-          width = Math.round((width * MAX_SIZE) / height);
-          height = MAX_SIZE;
-        }
-      }
-
-      canvas.width  = width;
-      canvas.height = height;
-      ctx.drawImage(img, 0, 0, width, height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-      /* jsQR */
-      const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
-      if (qr) { showResult(qr.data, 'QR Code'); return; }
-
-      /* ZXing with TRY_HARDER */
       try {
-        const formats = [
-          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
-          ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
-          ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.DATA_MATRIX,
-          ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.AZTEC,
-          ZXing.BarcodeFormat.QR_CODE,
-        ];
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        const canvas = document.createElement('canvas');
+        const ctx    = canvas.getContext('2d');
+        
+        // 1Dバーコードの極細な線をデコーダーが潰さずに判定できるよう、最適な解像度に制限
+        const MAX_SIZE = 1000;
+        let width = img.naturalWidth;
+        let height = img.naturalHeight;
+        
+        if (width > MAX_SIZE || height > MAX_SIZE) {
+          if (width > height) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = MAX_SIZE;
+          } else {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = MAX_SIZE;
+          }
+        }
 
-        const lum = new ZXing.RGBLuminanceSource(imageData.data, imageData.width, imageData.height);
-        const bin = new ZXing.HybridBinarizer(lum);
-        const bmp = new ZXing.BinaryBitmap(bin);
-        const reader = new ZXing.MultiFormatReader();
-        reader.setHints(hints);
-        const res = reader.decode(bmp);
+        canvas.width  = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        /* 1) jsQR で一度スキャン */
+        const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+        if (qr) {
+          showResult(qr.data, 'QR Code');
+          return;
+        }
+
+        /* 2) 自前のピクセル変換を通した ZXing コアデコード */
+        const res = decodeWithZXing(imageData);
         showResult(res.getText(), res.getBarcodeFormat().toString().replace(/_/g, ' '));
         return;
-      } catch (_) {}
+      } catch (e) {
+        console.error(e);
+      }
 
       setStatus('コードを検出できませんでした。鮮明な画像で再試行してください。');
     }
