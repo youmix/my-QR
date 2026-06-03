@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR・バーコードリーダー</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.0/umd/index.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #ffffff;
+      --bg-secondary: #f4f4f2;
+      --bg-info: #e6f1fb;
+      --text: #1a1a18;
+      --text-secondary: #5f5e5a;
+      --text-info: #185fa5;
+      --border: rgba(0,0,0,0.15);
+      --border-hover: rgba(0,0,0,0.3);
+      --border-info: rgba(24,95,165,0.4);
+      --success-bg: #eaf3de;
+      --success-text: #3b6d11;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1c1c1a;
+        --bg-secondary: #2a2a28;
+        --bg-info: #042c53;
+        --text: #f0ede6;
+        --text-secondary: #b4b2a9;
+        --text-info: #85b7eb;
+        --border: rgba(255,255,255,0.15);
+        --border-hover: rgba(255,255,255,0.3);
+        --border-info: rgba(133,183,235,0.4);
+        --success-bg: #173404;
+        --success-text: #c0dd97;
+      }
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg-secondary);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 1.5rem 1rem 3rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 560px;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 500;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    h1 svg { flex-shrink: 0; }
+
+    /* ── Tab buttons ── */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 1rem;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border-hover);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .tab-btn.active {
+      background: var(--bg-info);
+      color: var(--text-info);
+      border-color: var(--border-info);
+    }
+
+    /* ── Camera section ── */
+    .video-wrapper {
+      position: relative;
+      background: #000;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+      border: 0.5px solid var(--border);
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    #scan-canvas { display: none; }
+
+    .scan-frame {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .scan-box {
+      width: 220px;
+      height: 220px;
+      position: relative;
+    }
+
+    .corner {
+      position: absolute;
+      width: 36px;
+      height: 36px;
+      border: 3px solid #fff;
+    }
+    .corner.tl { top: 0; left: 0; border-right: none; border-bottom: none; border-radius: 4px 0 0 0; }
+    .corner.tr { top: 0; right: 0; border-left: none; border-bottom: none; border-radius: 0 4px 0 0; }
+    .corner.bl { bottom: 0; left: 0; border-right: none; border-top: none; border-radius: 0 0 0 4px; }
+    .corner.br { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 4px 0; }
+
+    .scan-line {
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      height: 2px;
+      background: rgba(56, 189, 248, 0.9);
+      animation: scanline 2s linear infinite;
+    }
+
+    @keyframes scanline {
+      0%   { top: 8%; }
+      50%  { top: 92%; }
+      100% { top: 8%; }
+    }
+
+    .cam-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      gap: 12px;
+    }
+
+    .cam-placeholder svg { opacity: 0.45; }
+    .cam-placeholder span { font-size: 14px; opacity: 0.65; }
+
+    .cam-controls {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    /* ── File section ── */
+    .drop-zone {
+      border: 2px dashed var(--border-hover);
+      border-radius: var(--radius-lg);
+      padding: 3rem 1rem;
+      text-align: center;
+      cursor: pointer;
+      background: var(--bg);
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .drop-zone:hover,
+    .drop-zone.drag-over {
+      border-color: var(--border-info);
+      background: var(--bg-info);
+    }
+
+    .drop-zone svg { opacity: 0.5; }
+    .drop-zone p.primary { margin: 12px 0 4px; font-size: 15px; color: var(--text); }
+    .drop-zone p.secondary { font-size: 13px; color: var(--text-secondary); }
+
+    .preview-container {
+      display: none;
+      margin-top: 8px;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      border: 0.5px solid var(--border);
+    }
+
+    #preview-img {
+      width: 100%;
+      display: block;
+      max-height: 300px;
+      object-fit: contain;
+      background: #000;
+    }
+
+    /* ── Shared buttons ── */
+    button {
+      font-family: inherit;
+      font-size: 14px;
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border-hover);
+      background: var(--bg);
+      color: var(--text);
+      cursor: pointer;
+      padding: 9px 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.15s;
+    }
+
+    button:hover { background: var(--bg-secondary); }
+    button:active { transform: scale(0.98); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .btn-full { flex: 1; justify-content: center; }
+
+    .btn-primary {
+      background: var(--bg-info);
+      color: var(--text-info);
+      border-color: var(--border-info);
+    }
+
+    .btn-primary:hover { opacity: 0.88; background: var(--bg-info); }
+
+    /* ── Result ── */
+    .result-card {
+      display: none;
+      margin-top: 1rem;
+      background: var(--bg);
+      border: 0.5px solid var(--border-hover);
+      border-radius: var(--radius-lg);
+      padding: 1rem 1.25rem;
+    }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .result-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--success-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .result-icon svg { color: var(--success-text); }
+
+    .result-type {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .result-text {
+      font-size: 15px;
+      color: var(--text);
+      word-break: break-all;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+
+    .result-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    /* ── History ── */
+    .history-section {
+      display: none;
+      margin-top: 1rem;
+    }
+
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .history-header span { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+
+    .history-header button {
+      font-size: 12px;
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      padding: 2px 4px;
+    }
+
+    .history-list { display: flex; flex-direction: column; gap: 6px; }
+
+    .history-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: background 0.15s;
+      border: none;
+      text-align: left;
+      width: 100%;
+    }
+
+    .history-item:hover { background: var(--bg); }
+    .history-item svg { flex-shrink: 0; margin-top: 2px; color: var(--text-secondary); }
+
+    .history-item-body { flex: 1; min-width: 0; }
+
+    .history-item-text {
+      font-size: 13px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .history-item-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+    /* ── Status ── */
+    #status-bar {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      text-align: center;
+      min-height: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
+        <path d="M14 14h1v1h-1z M17 14h1v1h-1z M14 17h1v1h-1z M17 17h3v3h-3z"/>
+      </svg>
+      QR・バーコードリーダー
+    </h1>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" id="btn-camera" onclick="switchMode('camera')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        カメラ
+      </button>
+      <button class="tab-btn" id="btn-file" onclick="switchMode('file')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        画像ファイル
+      </button>
+    </div>
+
+    <!-- Camera Section -->
+    <div id="camera-section">
+      <div class="video-wrapper">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="scan-canvas"></canvas>
+        <div class="scan-frame">
+          <div class="scan-box">
+            <div class="corner tl"></div>
+            <div class="corner tr"></div>
+            <div class="corner bl"></div>
+            <div class="corner br"></div>
+            <div class="scan-line"></div>
+          </div>
+        </div>
+        <div class="cam-placeholder" id="cam-placeholder">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          <span>下のボタンでカメラを起動</span>
+        </div>
+      </div>
+
+      <div class="cam-controls">
+        <button class="btn-full" id="start-btn" onclick="startCamera()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          起動
+        </button>
+        <button class="btn-full" id="stop-btn" onclick="stopCamera()" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+          停止
+        </button>
+        <button class="btn-full" id="flip-btn" onclick="flipCamera()" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          切替
+        </button>
+      </div>
+    </div>
+
+    <!-- File Section -->
+    <div id="file-section" style="display:none;">
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()" role="button" tabindex="0" aria-label="画像をクリックまたはドラッグ&ドロップでアップロード">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <p class="primary">クリックまたはドラッグ&ドロップ</p>
+        <p class="secondary">PNG / JPG / WebP / GIF 対応</p>
+      </div>
+      <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="handleFile(this)">
+      <div class="preview-container" id="preview-container">
+        <img id="preview-img" alt="プレビュー">
+      </div>
+    </div>
+
+    <!-- Result -->
+    <div class="result-card" id="result-section" role="region" aria-label="スキャン結果">
+      <div class="result-header">
+        <div class="result-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <span class="result-type" id="result-type">QR Code</span>
+      </div>
+      <p class="result-text" id="result-text"></p>
+      <div class="result-actions">
+        <button onclick="copyResult()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          コピー
+        </button>
+        <button class="btn-primary" id="open-btn" onclick="openResultUrl()" style="display:none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          URLを開く
+        </button>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="history-section" id="history-section">
+      <div class="history-header">
+        <span>スキャン履歴</span>
+        <button onclick="clearHistory()">クリア</button>
+      </div>
+      <div class="history-list" id="history-list"></div>
+    </div>
+
+    <div id="status-bar" role="status" aria-live="polite"></div>
+  </div>
+
+  <script>
+    /* ─── State ─── */
+    let stream = null;
+    let scanInterval = null;
+    let facingMode = 'environment';
+    let history = [];
+    let currentMode = 'camera';
+
+    /* ─── Utility ─── */
+    function setStatus(msg) {
+      document.getElementById('status-bar').textContent = msg;
+    }
+
+    function isUrl(str) {
+      return /^https?:\/\//i.test(str);
+    }
+
+    /* ─── Mode switching ─── */
+    function switchMode(mode) {
+      currentMode = mode;
+      const isCamera = (mode === 'camera');
+
+      document.getElementById('camera-section').style.display = isCamera ? 'block' : 'none';
+      document.getElementById('file-section').style.display  = isCamera ? 'none'  : 'block';
+
+      document.getElementById('btn-camera').classList.toggle('active', isCamera);
+      document.getElementById('btn-file').classList.toggle('active', !isCamera);
+
+      if (!isCamera) stopCamera();
+    }
+
+    /* ─── Camera ─── */
+    async function startCamera() {
+      try {
+        setStatus('カメラへのアクセスを要求中...');
+        if (stream) stream.getTracks().forEach(t => t.stop());
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode, width: { ideal: 1280 }, height: { ideal: 960 } }
+        });
+
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        document.getElementById('cam-placeholder').style.display = 'none';
+        document.getElementById('start-btn').disabled = true;
+        document.getElementById('stop-btn').disabled = false;
+        document.getElementById('flip-btn').disabled = false;
+
+        setStatus('スキャン中… QRコードまたはバーコードを枠内に合わせてください');
+        startScan();
+      } catch (e) {
+        setStatus('カメラへのアクセスに失敗しました: ' + e.message);
+      }
+    }
+
+    function stopCamera() {
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+
+      const video = document.getElementById('video');
+      video.srcObject = null;
+
+      document.getElementById('cam-placeholder').style.display = 'flex';
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('stop-btn').disabled = true;
+      document.getElementById('flip-btn').disabled = true;
+      setStatus('');
+    }
+
+    function flipCamera() {
+      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+      startCamera();
+    }
+
+    /* ─── Real-time scan loop ─── */
+    function startScan() {
+      const video  = document.getElementById('video');
+      const canvas = document.getElementById('scan-canvas');
+      const ctx    = canvas.getContext('2d');
+      let lastCode = '';
+      let lastTime = 0;
+
+      const zxingFormats = [
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.UPC_A,
+        ZXing.BarcodeFormat.UPC_E,
+        ZXing.BarcodeFormat.ITF,
+        ZXing.BarcodeFormat.DATA_MATRIX,
+        ZXing.BarcodeFormat.PDF_417,
+        ZXing.BarcodeFormat.AZTEC,
+        ZXing.BarcodeFormat.QR_CODE,
+      ];
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, zxingFormats);
+      const zxReader = new ZXing.MultiFormatReader();
+      zxReader.setHints(hints);
+
+      scanInterval = setInterval(() => {
+        if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let found = null;
+
+        /* 1) jsQR — QR-only, very fast */
+        const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+        if (qr) found = { text: qr.data, type: 'QR Code' };
+
+        /* 2) ZXing — all 1D/2D barcode formats */
+        if (!found) {
+          try {
+            const lum = new ZXing.RGBLuminanceSource(imageData.data, imageData.width, imageData.height);
+            const bin = new ZXing.HybridBinarizer(lum);
+            const bmp = new ZXing.BinaryBitmap(bin);
+            const res = zxReader.decode(bmp);
+            found = { text: res.getText(), type: res.getBarcodeFormat().toString().replace(/_/g, ' ') };
+          } catch (_) {}
+        }
+
+        if (found) {
+          const now = Date.now();
+          if (found.text === lastCode && now - lastTime < 3000) return; /* debounce */
+          lastCode = found.text;
+          lastTime = now;
+          showResult(found.text, found.type);
+        }
+      }, 200);
+    }
+
+    /* ─── File / image decode ─── */
+    function handleFile(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = document.getElementById('preview-img');
+        img.src = e.target.result;
+        document.getElementById('preview-container').style.display = 'block';
+        img.onload = () => decodeImage(img);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function decodeImage(img) {
+      setStatus('解析中...');
+      const canvas = document.createElement('canvas');
+      const ctx    = canvas.getContext('2d');
+      canvas.width  = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+      /* jsQR */
+      const qr = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+      if (qr) { showResult(qr.data, 'QR Code'); return; }
+
+      /* ZXing with TRY_HARDER */
+      try {
+        const formats = [
+          ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+          ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+          ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+          ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.DATA_MATRIX,
+          ZXing.BarcodeFormat.PDF_417, ZXing.BarcodeFormat.AZTEC,
+          ZXing.BarcodeFormat.QR_CODE,
+        ];
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+        const lum = new ZXing.RGBLuminanceSource(imageData.data, imageData.width, imageData.height);
+        const bin = new ZXing.HybridBinarizer(lum);
+        const bmp = new ZXing.BinaryBitmap(bin);
+        const reader = new ZXing.MultiFormatReader();
+        reader.setHints(hints);
+        const res = reader.decode(bmp);
+        showResult(res.getText(), res.getBarcodeFormat().toString().replace(/_/g, ' '));
+        return;
+      } catch (_) {}
+
+      setStatus('コードを検出できませんでした。鮮明な画像で再試行してください。');
+    }
+
+    /* ─── Show result ─── */
+    function showResult(text, type) {
+      document.getElementById('result-type').textContent = type;
+      document.getElementById('result-text').textContent = text;
+      document.getElementById('result-section').style.display = 'block';
+      document.getElementById('open-btn').style.display = isUrl(text) ? 'inline-flex' : 'none';
+
+      addHistory(text, type);
+      setStatus('✓ スキャン成功');
+
+      document.getElementById('result-section').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    /* ─── Actions ─── */
+    function copyResult() {
+      const text = document.getElementById('result-text').textContent;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(text)
+          .then(() => setStatus('コピーしました'))
+          .catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;opacity:0;';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setStatus('コピーしました');
+    }
+
+    function openResultUrl() {
+      const text = document.getElementById('result-text').textContent;
+      if (isUrl(text)) window.open(text, '_blank', 'noopener,noreferrer');
+    }
+
+    /* ─── History ─── */
+    function addHistory(text, type) {
+      history.unshift({ text, type, time: new Date().toLocaleTimeString('ja-JP') });
+      if (history.length > 10) history.pop();
+      renderHistory();
+    }
+
+    function renderHistory() {
+      const list = document.getElementById('history-list');
+      const sec  = document.getElementById('history-section');
+      if (history.length === 0) { sec.style.display = 'none'; return; }
+      sec.style.display = 'block';
+
+      list.innerHTML = history.map((h, i) => {
+        const iconPath = isUrl(h.text)
+          ? '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>'
+          : '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>';
+        return `
+          <button class="history-item" onclick="selectHistory(${i})">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>
+            <div class="history-item-body">
+              <div class="history-item-text">${escapeHtml(h.text)}</div>
+              <div class="history-item-meta">${escapeHtml(h.type)} · ${h.time}</div>
+            </div>
+          </button>`;
+      }).join('');
+    }
+
+    function selectHistory(i) {
+      const h = history[i];
+      showResult(h.text, h.type);
+    }
+
+    function clearHistory() {
+      history = [];
+      renderHistory();
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    /* ─── Drag & drop ─── */
+    const dropZone = document.getElementById('drop-zone');
+
+    dropZone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropZone.classList.add('drag-over');
+    });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        const input = document.getElementById('file-input');
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        handleFile(input);
+      }
+    });
+
+    /* keyboard support for drop zone */
+    dropZone.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        document.getElementById('file-input').click();
+      }
+    });
+
+    /* paste image from clipboard */
+    document.addEventListener('paste', e => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          const input = document.getElementById('file-input');
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+          if (currentMode !== 'file') switchMode('file');
+          handleFile(input);
+          break;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
